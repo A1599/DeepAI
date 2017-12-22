@@ -1,0 +1,403 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Dec 18 09:22:56 2017
+
+@author: Daniel
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Oct 02 12:55:28 2017
+http://scikit-learn.org/stable/modules/cross_validation.html
+http://www.statsmodels.org/dev/examples/index.html
+http://www3.dsi.uminho.pt/pcortez/student.pdf
+http://archive.ics.uci.edu/ml/datasets/Student+Performance
+http://pbpython.com/categorical-encoding.html
+http://www.statsmodels.org/dev/example_formulas.html
+@author: Daniel
+"""
+
+# This Python 3 environment comes with many helpful analytics libraries installed
+# For example, here's several helpful packages to load in 
+
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+
+# Input data files are available in the "../input/" directory.
+# For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
+
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels as sm
+import seaborn as sn
+color = sns.color_palette()
+
+%matplotlib inline
+
+pd.options.mode.chained_assignment = None
+pd.options.display.max_columns = 999
+
+# Any results you write to the current directory are saved as output.
+#d1=read.table("student-mat.csv",sep=";",header=TRUE)
+#d2=read.table("student-por.csv",sep=";",header=TRUE)
+#Binary classification – pass if G3≥10, else fail
+
+##read data
+d1=pd.read_csv("G:\\Consulting\\student\\student-mat.csv", sep=';')
+d1.shape
+d1.head()
+
+
+d2=pd.read_csv("G:\\Consulting\\student\\student-por.csv", sep=';')
+d2.shape
+d2.head()
+
+###Now let us check the dtypes of different types of variable.
+pd.options.display.max_rows = 65
+
+dtype_df = d1.dtypes.reset_index()
+dtype_df.columns = ["Count", "Column Type"]
+dtype_df
+dtype_df.groupby("Column Type").aggregate('count').reset_index()
+
+#####EDA of the data
+""" 
+1) Exploratory Data Analysis: what do the data reveal?
+What are your hypotheses? 
+What visualizations best describe the data?
+
+"""
+########plot
+plt.figure(figsize=(8,6))
+plt.scatter(range(d1.shape[0]), np.sort(d1.G3.values))
+plt.xlabel('index', fontsize=12)
+plt.ylabel('G3', fontsize=12)
+plt.show()
+
+########missing value detect
+missing_df = d1.isnull().sum(axis=0).reset_index()
+missing_df.columns = ['column_name', 'missing_count']
+missing_df = missing_df.ix[missing_df['missing_count']>0]
+missing_df = missing_df.sort_values(by='missing_count')
+
+ind = np.arange(missing_df.shape[0])
+width = 0.9
+fig, ax = plt.subplots(figsize=(12,18))
+rects = ax.barh(ind, missing_df.missing_count.values, color='blue')
+ax.set_yticks(ind)
+ax.set_yticklabels(missing_df.column_name.values, rotation='horizontal')
+ax.set_xlabel("Count of missing values")
+ax.set_title("Number of missing values in each column")
+plt.show()
+
+
+
+# Now let us look at the correlation coefficient of each of these variables #
+x_cols = [col for col in d1.columns if col not in ['G3'] if d1[col].dtype=='int64']
+
+labels = []
+values = []
+for col in x_cols:
+    labels.append(col)
+    values.append(np.corrcoef(d1[col].values, d1.G3.values)[0,1])
+corr_df = pd.DataFrame({'col_labels':labels, 'corr_values':values})
+corr_df = corr_df.sort_values(by='corr_values')
+    
+ind = np.arange(len(labels))
+width = 0.9
+fig, ax = plt.subplots(figsize=(12,40))
+rects = ax.barh(ind, np.array(corr_df.corr_values.values), color='y')
+ax.set_yticks(ind)
+ax.set_yticklabels(corr_df.col_labels.values, rotation='horizontal')
+ax.set_xlabel("Correlation coefficient")
+ax.set_title("Correlation coefficient of the variables")
+#autolabel(rects)
+plt.show()
+
+
+corr_df
+
+corr_df_sel = corr_df.ix[(corr_df['corr_values']>0.02) | (corr_df['corr_values'] < -0.01)]
+corr_df_sel
+
+
+cols_to_use = corr_df_sel.col_labels.tolist()
+
+temp_df = d1[cols_to_use]
+corrmat = temp_df.corr(method='spearman')
+f, ax = plt.subplots(figsize=(8, 8))
+
+# Draw the heatmap using seaborn
+sns.heatmap(corrmat, vmax=1., square=True)
+plt.title("Important variables correlation map", fontsize=15)
+plt.show()
+
+"""
+['failures',
+ 'age',
+ 'goout',
+ 'traveltime',
+ 'health',
+ 'Dalc',
+ 'Walc',
+ 'absences',
+ 'famrel',
+ 'studytime',
+ 'Fedu',
+ 'Medu',
+ 'G1',
+ 'G2']
+"""
+
+col = "G2"
+
+plt.figure(figsize=(12,12))
+sns.jointplot(x=d1.G2.values, y=d1.G3.values, size=10, color=color[4])
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('G2', fontsize=12)
+plt.title("G2 Vs G3", fontsize=15)
+plt.show()
+
+col = "G1"
+
+plt.figure(figsize=(12,12))
+sns.jointplot(x=d1.G1.values, y=d1.G3.values, size=10, color=color[4])
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('G1', fontsize=12)
+plt.title("G1 Vs G3", fontsize=15)
+plt.show()
+
+########Multicollinearity Analysis
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor  
+import warnings
+warnings.filterwarnings("ignore")
+
+def calculate_vif_(X):
+    variables = list(X.columns)
+    vif = {variable:variance_inflation_factor(exog=X.values, exog_idx=ix) for ix,variable in enumerate(list(X.columns))}
+    return vif
+
+
+numericalCol = []
+for f in d1.columns:
+    #print (f)
+    if d1[f].dtype!='object' and f not in ["G3"]:
+        numericalCol.append(f)
+mergedFilterd = d1[numericalCol].fillna(-999)
+vifDict = calculate_vif_(mergedFilterd)
+
+vifDf = pd.DataFrame()
+vifDf['variables'] = vifDict.keys()
+vifDf['vifScore'] = vifDict.values()
+vifDf.sort_values(by=['vifScore'],ascending=False,inplace=True)
+validVariables = vifDf[vifDf["vifScore"]<=5]
+variablesWithMC  = vifDf[vifDf["vifScore"]>5]
+
+fig,(ax1,ax2) = plt.subplots(ncols=2)
+fig.set_size_inches(20,8)
+sn.barplot(data=validVariables,x="vifScore",y="variables",ax=ax1,orient="h",color="#34495e")
+sn.barplot(data=variablesWithMC.head(5),x="vifScore",y="variables",ax=ax2,orient="h",color="#34495e")
+ax1.set(xlabel='VIF Scores', ylabel='Features',title="Valid Variables Without Multicollinearity")
+ax2.set(xlabel='VIF Scores', ylabel='Features',title="Variables Which Exhibit Multicollinearity")
+
+
+
+
+
+###############Categprical EDA
+
+# Now let us look at the correlation coefficient of each of these variables #
+x_cols = [col for col in d1.columns if col not in ['G3'] if d1[col].dtype=='object']
+x_cols 
+x_cols[0]
+"""
+['school',
+ 'sex',
+ 'address',
+ 'famsize',
+ 'Pstatus',
+ 'Mjob',
+ 'Fjob',
+ 'reason',
+ 'guardian',
+ 'schoolsup',
+ 'famsup',
+ 'paid',
+ 'activities',
+ 'nursery',
+ 'higher',
+ 'internet',
+ 'romantic']
+"""
+###########frequnxy table
+
+plt.figure(figsize=(12,8))
+sns.countplot(x="school", data=d1)
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('school', fontsize=12)
+plt.xticks(rotation='vertical')
+plt.title("Frequency of school", fontsize=15)
+plt.show()
+
+########Box-plot
+plt.figure(figsize=(12,8))
+sns.boxplot(x="school", y="G3", data=d1)
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('school', fontsize=12)
+plt.xticks(rotation='vertical')
+plt.title("Box-plot", fontsize=15)
+plt.show()
+
+########Box-plot
+plt.figure(figsize=(12,8))
+sns.boxplot(x="sex", y="G3", data=d1)
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('sex', fontsize=12)
+plt.xticks(rotation='vertical')
+plt.title("Box-plot", fontsize=15)
+plt.show()
+
+
+########Box-plot
+plt.figure(figsize=(12,8))
+sns.boxplot(x="famsize", y="G3", data=d1)
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('famsize', fontsize=12)
+plt.xticks(rotation='vertical')
+plt.title("Box-plot", fontsize=15)
+plt.show()
+
+
+########Box-plot
+plt.figure(figsize=(12,8))
+sns.boxplot(x="Pstatus", y="G3", data=d1)
+plt.ylabel('G3', fontsize=12)
+plt.xlabel('Pstatus', fontsize=12)
+plt.xticks(rotation='vertical')
+plt.title("Box-plot", fontsize=15)
+plt.show()
+
+
+"""
+2) Build the multiple regression model.
+What features should be included and excluded? Why?
+What are the best predictors of student success?
+How do you evaluate the quality of your model?
+"""
+"""
+['school',
+ 'sex',
+ 'address',
+ 'famsize',
+ 'Pstatus',
+ 'Mjob',
+ 'Fjob',
+ 'reason',
+ 'guardian',
+ 'schoolsup',
+ 'famsup',
+ 'paid',
+ 'activities',
+ 'nursery',
+ 'higher',
+ 'internet',
+ 'romantic']
+"""
+
+#####code objective to categorical to dummy variable
+
+from sklearn.preprocessing import LabelEncoder
+
+lb_make = LabelEncoder()
+d1["school_code"] = lb_make.fit_transform(d1["school"])
+d1[["school", "school_code"]].head(100)
+
+d1["address_code"] = lb_make.fit_transform(d1["address"])
+d1[["address", "address_code"]].head(100)
+
+d1["famsize_code"] = lb_make.fit_transform(d1["famsize"])
+d1[["famsize", "famsize_code"]].head(100)
+
+d1["Pstatus_code"] = lb_make.fit_transform(d1["Pstatus"])
+d1[["Pstatus", "Pstatus_code"]].head(100)
+
+d1["Mjob_code"] = lb_make.fit_transform(d1["Mjob"])
+d1[["Mjob", "Mjob_code"]].head(100)
+
+d1["Fjob_code"] = lb_make.fit_transform(d1["Fjob"])
+d1[["Fjob", "Fjob_code"]].head(100)
+
+d1["reason_code"] = lb_make.fit_transform(d1["reason"])
+d1[["reason", "reason_code"]].head(100)
+
+d1["guardian_code"] = lb_make.fit_transform(d1["guardian"])
+d1[["guardian", "guardian_code"]].head(100)
+
+d1["schoolsup_code"] = lb_make.fit_transform(d1["schoolsup"])
+d1[["schoolsup", "schoolsup_code"]].head(100)
+
+d1["famsup_code"] = lb_make.fit_transform(d1["famsup"])
+d1[["famsup", "famsup_code"]].head(100)
+
+d1["paid_code"] = lb_make.fit_transform(d1["paid"])
+d1[["paid", "paid_code"]].head(100)
+
+d1["activities_code"] = lb_make.fit_transform(d1["activities"])
+d1[["activities", "activities_code"]].head(100)
+
+d1["nursery_code"] = lb_make.fit_transform(d1["nursery"])
+d1[["nursery", "nursery_code"]].head(100)
+
+d1["higher_code"] = lb_make.fit_transform(d1["higher"])
+d1[["higher", "higher_code"]].head(100)
+
+d1["internet_code"] = lb_make.fit_transform(d1["internet"])
+d1[["internet", "internet_code"]].head(100)
+
+
+d1["romantic_code"] = lb_make.fit_transform(d1["romantic"])
+d1[["romantic", "romantic_code"]].head(100)
+
+d1.head()
+
+
+
+
+%matplotlib inline
+
+from __future__ import print_function
+import numpy as np
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+from statsmodels.sandbox.regression.predstd import wls_prediction_std
+import statsmodels.formula.api as smf
+
+
+np.random.seed(9876789)
+#####regression model
+"""
+OLS regression using formulas
+"""
+
+
+##http://www.statsmodels.org/dev/example_formulas.html
+mod = smf.ols(formula='G3 ~ failures+age+ goout+ traveltime+ health +Dalc +Walc'
+              '+absences +famrel +studytime +Fedu +Medu +G1 +G2+C(school)'
+              '+C(sex) +C(address)+C(famsize) +C(Pstatus) +C(Mjob)+C(Fjob)'
+              '+C(reason)+C(guardian) +C(schoolsup) +C(famsup)+C(paid)+C(activities) '
+              '+C(nursery)+C(higher) +C(internet)+C(romantic)', data=d1)
+res = mod.fit()
+print(res.summary())
+
+print(res.params)
+
+
+"""
+3) Communicate your preliminary conclusions.
+What recommendations would you make to the program to detect students less likely to succeed?
+Any other insights from the data?
+
+"""
